@@ -6,7 +6,7 @@ import numpy as np
 from prysm import detector, psf, Convolvable
 
 import matplotlib as mpl
-mpl.use('TkAgg')
+mpl.use('Agg')
 
 
 @pytest.fixture
@@ -20,12 +20,10 @@ def sample_detector():
     return detector.Detector(10)
 
 
-@pytest.mark.dependency(name='sample_conv')
 def test_detector_can_sample_convolvable(sample_detector, sample_psf):
     assert sample_detector.capture(sample_psf)
 
 
-@pytest.mark.dependency(depends=['sample_conv'])
 def test_detector_can_save_result(tmpdir, sample_detector, sample_psf):
     p = tmpdir.mkdir('detector_out').join('out.png')
     sample_detector.capture(sample_psf)

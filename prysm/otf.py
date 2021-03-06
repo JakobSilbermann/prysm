@@ -1,6 +1,4 @@
 """A base optical transfer function interface."""
-import warnings
-
 from .conf import config
 from .mathops import engine as e
 from ._richdata import RichData
@@ -9,7 +7,7 @@ from .fttools import forward_ft_unit
 
 
 def transform_psf(psf, sample_spacing):
-    data = e.fft.fftshift(e.fft.fft2(e.fft.ifftshift(psf.data)))  # no need to ifftshift first - phase is unimportant
+    data = e.fft.fftshift(e.fft.fft2(e.fft.ifftshift(psf.data)))
     y, x = [forward_ft_unit(sample_spacing / 1e3, s) for s in psf.shape]  # 1e3 for microns => mm
     return x, y, data
 
@@ -30,6 +28,7 @@ class OTF:
             x Cartesian spatial frequencies
         y : `numpy.ndarray`
             y Cartesian spatial frequencies
+
         """
         self.mtf = mtf
         self.ptf = ptf
@@ -160,27 +159,9 @@ class MTF(RichData):
         dat /= dat[cy, cx]
         return MTF(data=dat, x=x, y=y)
 
-    @property
-    def tan(self):
-        warnings.warn('.tan is deprecated and will be removed in v0.18, please use .slices().x')
-        return self.slices().x
-
-    @property
-    def sag(self):
-        warnings.warn('.sag is deprecated and will be removed in v0.18, please use .slices().y')
-        return self.slices().y
-
-    def exact_tan(self, freq):
-        warnings.warn('.exact_tan is deprecated and will be removed in v0.18, please use .exact_x')
-        return self.exact_x(freq)
-
-    def exact_sag(self, freq):
-        warnings.warn('.exact_sag is deprecated and will be removed in v0.18, please use .exact_y')
-        return self.exact_y(freq)
-
 
 class PTF(RichData):
-    """Phase Transfer Function"""
+    """Phase Transfer Function."""
 
     def __init__(self, data, x, y, xy_unit=None, z_unit=None, labels=None):
         """Create a new `PTF` instance.
@@ -393,6 +374,24 @@ def longexposure_otf(nu, Cn, z, f, lambdabar, h_z_by_r=2.91):
     nupow = nu ** power
     const = const1 * const2
     return e.exp(const * nupow)
+
+
+def komogorov(r, r0):
+    """Calculate the phase structure function D_phi in the komogorov approximation.
+
+    Parameters
+    ----------
+    r : `numpy.ndarray`
+        r, radial frequency parameter (object space)
+    r0 : `float`
+        Fried parameter
+
+    Returns
+    -------
+    `numpy.ndarray`
+
+    """
+    return 6.88 * (r/r0) ** (5/3)
 
 
 def estimate_Cn(P=1013, T=273.15, Ct=1e-4):

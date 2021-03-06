@@ -12,7 +12,7 @@ from .util import std
 
 class Pupil(OpticalPhase):
     """Pupil of an optical system."""
-    def __init__(self, samples=128, dia=1, labels=None, xy_unit=None, z_unit=None, opd_unit=None, wavelength=None,
+    def __init__(self, samples=128, dia=1, labels=None, xy_unit=None, z_unit=None, wavelength=None,
                  phase_mask='circle', transmission='circle', x=None, y=None, phase=None):
         """Create a new `Pupil` instance.
 
@@ -59,30 +59,29 @@ class Pupil(OpticalPhase):
             # data already known
             need_to_build = False
 
+        if phase is not None:
+            need_to_build = False
+
         if labels is None:
             labels = config.pupil_labels
 
         super().__init__(x=x, y=y, phase=phase, labels=labels,
                          xy_unit=xy_unit or config.phase_xy_unit,
                          z_unit=z_unit or config.phase_z_unit,
-                         opd_unit=opd_unit, wavelength=wavelength)
+                         wavelength=wavelength)
 
         phase_mask = mask_cleaner(phase_mask, samples)
-
         if need_to_build:
             self.samples = samples
             self.build()
             if phase_mask is not None:
-                self.phase = self.phase * phase_mask
-                self.phase[phase_mask == 0] = e.nan
+                self.data = self.data * phase_mask
+                self.data[phase_mask == 0] = e.nan
 
             transmission = mask_cleaner(transmission, samples)
             self.transmission = transmission
             self.phase_mask = phase_mask
         else:
-            holes = e.isnan(phase)
-            transmission = e.ones(holes.shape)
-            transmission[holes] = 0
             self.transmission = transmission
             self.phase_mask = phase_mask
 
@@ -121,7 +120,7 @@ class Pupil(OpticalPhase):
 
         """
         # fill in the phase of the pupil
-        self.phase = e.zeros((self.samples, self.samples), dtype=config.precision)
+        self.data = e.zeros((self.samples, self.samples), dtype=config.precision)
 
         return self
 

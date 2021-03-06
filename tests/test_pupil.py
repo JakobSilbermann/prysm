@@ -3,7 +3,7 @@ import pytest
 
 import numpy as np
 
-from prysm import Pupil, FringeZernike
+from prysm import Pupil, FringeZernike, Interferogram
 
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def p():
 
 @pytest.fixture
 def p_tlt():
-    return FringeZernike(Z2=1, base=1, samples=64)
+    return FringeZernike(Z2=1, samples=64)
 
 
 def test_pupil_passes_valid_params():
@@ -63,3 +63,16 @@ def test_pupil_sub_functions(p):
 
 def test_pupil_strehl_does_not_throw(p):
     assert p.strehl
+
+
+def test_passed_phase_is_not_ignored():
+    phase = np.random.rand(32, 32)
+    x = y = np.linspace(-1, 1, 128)
+    p = Pupil(x=x, y=y, phase=phase)
+    assert np.all(p.phase == phase)
+    assert p.samples_y == 32
+
+
+def test_can_astype_to_interferogram(p):
+    i = p.astype(Interferogram)
+    assert i

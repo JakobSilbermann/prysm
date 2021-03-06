@@ -1,10 +1,9 @@
 """Configuration for this instance of prysm."""
 import copy
 
-import numpy as np
-
 from astropy import units as u
 
+from .mathops import engine as np
 from .wavelengths import HeNe
 
 all_ap_unit_types = (u.Unit, u.core.IrreducibleUnit, u.core.CompositeUnit)
@@ -38,7 +37,7 @@ def sanitize_unit(unit, wavelength):
 
 
 def format_unit(unit_or_quantity, fmt):
-    """(string) format a unit or quantity
+    """(string) format a unit or quantity.
 
     Parameters
     ----------
@@ -69,7 +68,7 @@ class Labels:
                  unit_prefix='[',
                  unit_suffix=']',
                  unit_joiner=' '):
-        """Create a new Labels instance
+        """Create a new Labels instance.
 
         Parameters
         ----------
@@ -89,6 +88,7 @@ class Labels:
             suffix used to surround the unit text
         unit_joiner : `str`, optional
             text used to combine the base label and the unit
+
         """
         self.xy_base, self._z = xy_base, z
         self.xy_additions, self.xy_addition_side = xy_additions, xy_addition_side
@@ -97,7 +97,7 @@ class Labels:
         self.unit_joiner = unit_joiner
 
     def _label_factory(self, label, xy_unit, z_unit):
-        """Factory method to produce complex labels.
+        """Produce complex labels.
 
         Parameters
         ----------
@@ -149,7 +149,7 @@ class Labels:
         return self._label_factory('z', xy_unit, z_unit)
 
     def generic(self, xy_unit, z_unit):
-        """Generic label without extra X/Y annotation."""
+        """Label without extra X/Y annotation."""
         base = self.xy_base
         join = self.unit_joiner
         unit = format_unit(xy_unit, config.unit_format)
@@ -158,6 +158,7 @@ class Labels:
         return f'{base}{join}{prefix}{unit}{suffix}'
 
     def copy(self):
+        """(Deep) copy."""
         return copy.deepcopy(self)
 
 
@@ -183,8 +184,6 @@ class Config(object):
     """Global configuration of prysm."""
     def __init__(self,
                  precision=64,
-                 backend=np,
-                 zernike_base=1,
                  Q=2,
                  wavelength=HeNe,
                  phase_cmap='inferno',
@@ -215,10 +214,6 @@ class Config(object):
         ----------
         precision : `int`
             32 or 64, number of bits of precision
-        backend : `str`, {'np'}
-            a supported backend.  Current options are only "np" for numpy
-        zernike_base : `int`, {0, 1}
-            base for zernikes; start at 0 or 1
         Q : `float`
             oversampling parameter for numerical propagations
         phase_cmap : `str`
@@ -249,11 +244,9 @@ class Config(object):
             default units used for image-like types
 
         """
+        self.chbackend_observers = []
         self.initialized = False
         self.precision = precision
-        self.backend = backend
-        self.zernike_base = zernike_base
-        self.chbackend_observers = []
         self.Q = Q
         self.wavelength = wavelength
         self.phase_cmap = phase_cmap
@@ -328,80 +321,6 @@ class Config(object):
         else:
             self._precision = np.float64
             self._precision_complex = np.complex128
-
-    @property
-    def backend(self):
-        """Backend used.
-
-        Returns
-        -------
-        `str`
-            {'np'} only
-
-        """
-        return self._backend
-
-    @backend.setter
-    def backend(self, backend):
-        """Set the backend used by prysm.
-
-        Parameters
-        ----------
-        backend : `str`, {'np'}
-            backend used for computations
-
-        Raises
-        ------
-        ValueError
-            invalid backend
-
-        """
-        if isinstance(backend, str):
-            if backend.lower() in ('np', 'numpy'):
-                backend = 'numpy'
-            elif backend.lower() in ('cp', 'cu', 'cuda'):
-                backend = 'cupy'
-
-            exec(f'import {backend}')
-            self._backend = eval(backend)
-        else:
-            self._backend = backend
-
-        if self.initialized:
-            for obs in self.chbackend_observers:
-                obs(self._backend)
-
-    @property
-    def zernike_base(self):
-        """Zernike base.
-
-        Returns
-        -------
-        `int`
-            {0, 1}
-
-        """
-        return self._zernike_base
-
-    @zernike_base.setter
-    def zernike_base(self, base):
-        """Zernike base; base-0 or base-1.
-
-        Parameters
-        ----------
-        base : `int`, {0, 1}
-            first index of zernike polynomials
-
-        Raises
-        ------
-        ValueError
-            invalid base given
-
-        """
-        if base not in (0, 1):
-            raise ValueError('By convention zernike base must be 0 or 1.')
-
-        self._zernike_base = base
 
 
 config = Config()

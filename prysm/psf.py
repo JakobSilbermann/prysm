@@ -1,19 +1,24 @@
-"""A base point spread function interface."""
+"""A base point spread function interfacnp."""
 import numbers
-
-from scipy import optimize, interpolate, special
 
 from astropy import units as u
 
+from scipy import optimize
+
 from .conf import config
-from .mathops import engine as e, jinc
+from .mathops import (
+    np, jinc,
+    ndimage_engine as ndimage,
+    interpolate_engine as interpolate,
+    special_engine as special
+)
 from .coordinates import cart_to_polar, uniform_cart_to_polar
 from .plotting import share_fig_ax
 from .util import sort_xy
 from .convolution import Convolvable
 from .propagation import (
-    prop_pupil_plane_to_psf_plane,
-    prop_pupil_plane_to_psf_plane_units,
+    focus,
+    focus_units,
 )
 
 FIRST_AIRY_ZERO = 1.220
@@ -65,9 +70,9 @@ def estimate_size(x, y, data, metric, criteria='last'):
     if metric == 'fwhm':
         hm = max_ / 2
     elif metric == '1/e':
-        hm = 1 / e.e * max_
+        hm = 1 / np.e * max_
     elif metric == '1/e^2':
-        hm = 1 / (e.e ** 2) * max_
+        hm = 1 / (np.e ** 2) * max_
     elif isinstance(metric, numbers.Number):
         hm = metric
     else:
@@ -76,10 +81,10 @@ def estimate_size(x, y, data, metric, criteria='last'):
     mask = polar > hm
 
     if criteria == 'first':
-        meanidx = e.argmax(mask, axis=1).mean()
+        meanidx = np.argmax(mask, axis=1).mean()
         lowidx, remainder = divmod(meanidx, 1)
     elif criteria == 'last':
-        meanidx = e.argmax(mask[:, ::-1], axis=1).mean()
+        meanidx = np.argmax(mask[:, ::-1], axis=1).mean()
         meanidx = mask.shape[1] - meanidx
         lowidx, remainder = divmod(meanidx, 1)
         remainder *= -1  # remainder goes the other way in this case
@@ -288,8 +293,8 @@ class PSF(Convolvable):
         # compute MTF from the PSF
         if self._mtf is None:
             self._mtf = MTF.from_psf(self)
-            nx, ny = e.meshgrid(self._mtf.x, self._mtf.y)
-            self._nu_p = e.sqrt(nx ** 2 + ny ** 2)
+            nx, ny = np.meshgrid(self._mtf.x, self._mtf.y)
+            self._nu_p = np.sqrt(nx ** 2 + ny ** 2)
             # this is meaninglessly small and will avoid division by 0
             self._nu_p[self._nu_p == 0] = 1e-99
             self._dnx, self._dny = ny[1, 0] - ny[0, 0], nx[0, 1] - nx[0, 0]
@@ -304,7 +309,7 @@ class PSF(Convolvable):
                                                          self._dnx,
                                                          self._dny)
                 out.append(self._ee[r])
-            return e.asarray(out)
+            return np.asarray(out)
         else:
             if radius not in self._ee:
                 self._ee[radius] = _encircled_energy_core(self._mtf.data,
@@ -353,28 +358,28 @@ class PSF(Convolvable):
             line width
         zorder : `int` optional
             zorder
-        fig : `matplotlib.figure.Figure`, optional
+        fig : `matplotlib.figurnp.Figure`, optional
             Figure containing the plot
         ax : `matplotlib.axes.Axis`, optional:
             Axis containing the plot
 
         Returns
         -------
-        fig : `matplotlib.figure.Figure`, optional
+        fig : `matplotlib.figurnp.Figure`, optional
             Figure containing the plot
         ax : `matplotlib.axes.Axis`, optional:
             Axis containing the plot
 
         """
         if axlim is None:
-            if len(self._ee) is not 0:
+            if len(self._ee) != 0:
                 xx, yy = sort_xy(self._ee.keys(), self._ee.values())
             else:
                 raise ValueError('if no values for encircled energy have been computed, axlim must be provided')
-        elif axlim is 0:
-            raise ValueError('computing from 0 to 0 is stupid')
+        elif axlim == 0:
+            raise ValueError('computing from 0 to 0 is not possible')
         else:
-            xx = e.linspace(1e-5, axlim, npts)
+            xx = np.linspace(1e-5, axlim, npts)
             yy = self.encircled_energy(xx)
 
         fig, ax = share_fig_ax(fig, ax)
@@ -403,6 +408,62 @@ class PSF(Convolvable):
         elif to.lower() == 'total':
             ttl = self.data.sum()
             self.data /= ttl
+        return self
+
+    def centroid(self, unit='spatial'):
+        """Calculate the centroid of the PSF.
+
+        Parameters
+        ----------
+        unit : `str`, {'spatial', 'pixels'}
+            unit to return the centroid in.
+            If pixels, corner indexed.  If spatial, center indexed.
+
+        Returns
+        -------
+        `int`, `int`
+            if unit == pixels, indices into the array
+        `float`, `float`
+            if unit == spatial, referenced to the origin
+
+        """
+        com = ndimage.center_of_mass(self.data)
+        if unit != 'spatial':
+            return com
+        else:
+            # tuple - cast from generator
+            # sample spacing - indices to units
+            # x-c -- index shifted from center
+            return tuple(self.sample_spacing * (x-c) for x, c in zip(com, (self.center_y, self.center_x)))
+
+    def autowindow(self, width, unit='pixels'):
+        """Crop to a rectangular window around the centroid.
+
+        Parameters
+        ----------
+        width : `float`
+            diameter of the output window
+        unit : `str`, {'pixels', 'spatial'}
+            if pixels, the width is measured in pixels.  Otherwise, in spatial units
+
+        Returns
+        -------
+        `self`
+            modified PSF instance
+
+        """
+        com = self.centroid('pixels')
+        cy, cx = (int(c) for c in com)
+        w = width // 2
+        aoi_y_l = cy - w
+        aoi_y_h = cy + w
+        aoi_x_l = cx - w
+        aoi_x_h = cx + w
+        print(aoi_y_l, aoi_y_h)
+        print(aoi_x_l, aoi_x_h)
+        self.data = self.data[aoi_y_l:aoi_y_h, aoi_x_l:aoi_x_h]
+        self.x = self.x[aoi_x_l:aoi_x_h]
+        self.y = self.y[aoi_y_l:aoi_y_h]
         return self
 
     @staticmethod
@@ -438,7 +499,8 @@ class PSF(Convolvable):
         """
         # propagate PSF data
         fcn, ss, wvl = pupil.fcn, pupil.sample_spacing, pupil.wavelength.to(u.um)
-        data = prop_pupil_plane_to_psf_plane(fcn, Q)
+        data = focus(fcn, Q=Q, incoherent=incoherent,
+                     norm=norm if norm not in ('max', 'radiometric') else None)
         norm = norm.lower()
         if norm == 'max':
             coef = 1 / data.max()
@@ -454,7 +516,7 @@ class PSF(Convolvable):
             raise ValueError('unknown norm')
 
         data = data * coef
-        ux, uy = prop_pupil_plane_to_psf_plane_units(fcn, ss, efl, wvl, Q)
+        ux, uy = focus_units(fcn, ss, efl, wvl, Q)
         psf = PSF(x=ux, y=uy, data=data)
 
         psf.fno = efl / pupil.diameter
@@ -489,13 +551,13 @@ class PSF(Convolvable):
                 ref_samples_x = psf.samples_x
                 ref_samples_y = psf.samples_y
 
-        merge_data = e.zeros((ref_samples_x, ref_samples_y, len(psfs)))
+        merge_data = np.zeros((ref_samples_x, ref_samples_y, len(psfs)))
         for idx, psf in enumerate(psfs):
             # don't do anything to the reference PSF besides spectral scaling
             if idx is ref_idx:
                 merge_data[:, :, idx] = psf.data * spectral_weights[idx]
             else:
-                xv, yv = e.meshgrid(ref_x, ref_y)
+                xv, yv = np.meshgrid(ref_x, ref_y)
                 interpf = interpolate.RegularGridInterpolator((psf.y, psf.x), psf.data)
                 merge_data[:, :, idx] = interpf((yv, xv), method=interp_method) * spectral_weights[idx]
 
@@ -506,7 +568,7 @@ class PSF(Convolvable):
 
 
 class AiryDisk(Convolvable):
-    """An airy disk, the PSF of a circular aperture."""
+    """An airy disk, the PSF of a circular aperturnp."""
     def __init__(self, fno, wavelength, extent=None, samples=None):
         """Create a new AiryDisk.
 
@@ -517,15 +579,15 @@ class AiryDisk(Convolvable):
         wavelength : `float`
             wavelength of light, in microns
         extent : `float`
-            cartesian window half-width, e.g. 10 will make an RoI 20x20 microns wide
+            cartesian window half-width, np.g. 10 will make an RoI 20x20 microns wide
         samples : `int`
             number of samples across full width
 
         """
         if samples is not None:
-            x = e.linspace(-extent, extent, samples)
-            y = e.linspace(-extent, extent, samples)
-            xx, yy = e.meshgrid(x, y)
+            x = np.linspace(-extent, extent, samples)
+            y = np.linspace(-extent, extent, samples)
+            xx, yy = np.meshgrid(x, y)
             rho, phi = cart_to_polar(xx, yy)
             data = airydisk(rho, fno, wavelength)
         else:
@@ -558,7 +620,7 @@ class AiryDisk(Convolvable):
 
 
 def airydisk(unit_r, fno, wavelength):
-    """Compute the airy disk function over a given spatial distance.
+    """Compute the airy disk function over a given spatial distancnp.
 
     Parameters
     ----------
@@ -575,7 +637,7 @@ def airydisk(unit_r, fno, wavelength):
         ndarray containing the airy pattern
 
     """
-    u_eff = unit_r * e.pi / wavelength / fno
+    u_eff = unit_r * np.pi / wavelength / fno
     return abs(2 * jinc(u_eff)) ** 2
 
 
@@ -601,13 +663,13 @@ def _encircled_energy_core(mtf_data, radius, nu_p, dx, dy):
         encircled energy for given radius
 
     """
-    integration_fourier = special.j1(2 * e.pi * radius * nu_p) / nu_p
+    integration_fourier = special.j1(2 * np.pi * radius * nu_p) / nu_p
     dat = mtf_data * integration_fourier
     return radius * dat.sum() * dx * dy
 
 
 def _analytical_encircled_energy(fno, wavelength, points):
-    """Compute the analytical encircled energy for a diffraction limited circular aperture.
+    """Compute the analytical encircled energy for a diffraction limited circular aperturnp.
 
     Parameters
     ----------
@@ -624,7 +686,7 @@ def _analytical_encircled_energy(fno, wavelength, points):
         encircled energy values
 
     """
-    p = points * e.pi / fno / wavelength
+    p = points * np.pi / fno / wavelength
     return 1 - special.j0(p)**2 - special.j1(p)**2
 
 

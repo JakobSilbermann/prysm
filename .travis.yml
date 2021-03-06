@@ -5,21 +5,22 @@ before_install:
   - ./miniconda.sh -b
   - export PATH=/home/travis/miniconda3/bin:$PATH
 install:
-  - conda create -n prysmci python=3.7 --yes
+  - conda create -n prysmci python=3.8 --yes
   - source activate prysmci
+  - conda config --add channels conda-forge
   - >-
       conda install --yes
-      numpy>=1.15
-      scipy>=1.2
-      astropy>=3.2.1
+      numpy>=1.18
+      scipy>=1.5
+      astropy>=4.0.0
       matplotlib>=3.0
       scikit-image
       imageio
       pandas
       h5py
-      pytest=4.2.1
-      pytest-cov=2.6.1
-      coveralls=1.5.1
+      pytest=5.4.3
+      pytest-cov=2.10.0
+      coveralls==2.1.1
   - pip install .
 services:
   - xvfb

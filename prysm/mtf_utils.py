@@ -1,8 +1,6 @@
 """Utilities for working with MTF data."""
 import operator
 
-from scipy.interpolate import griddata, RegularGridInterpolator as RGI
-
 from .mathops import engine as e
 from .plotting import share_fig_ax
 from .io import read_trioptics_mtf_vs_field, read_trioptics_mtfvfvf
@@ -612,8 +610,8 @@ def radial_mtf_to_mtfffd_data(tan, sag, imagehts, azimuths, upsample):
     up_s = e.empty((len(aq), sag.shape[1], len(iq)))
     for idx in range(tan.shape[1]):
         t, s = tan[:, idx, :], sag[:, idx, :]
-        interpft = RGI((azimuths, imagehts), t, method='linear')
-        interpfs = RGI((azimuths, imagehts), s, method='linear')
+        interpft = e.scipy.interpolate.RegularGridInterpolator((azimuths, imagehts), t, method='linear')
+        interpfs = e.scipy.interpolate.RegularGridInterpolator((azimuths, imagehts), s, method='linear')
         up_t[:, idx, :] = interpft((aa, ii))
         up_s[:, idx, :] = interpfs((aa, ii))
 
@@ -634,8 +632,8 @@ def radial_mtf_to_mtfffd_data(tan, sag, imagehts, azimuths, upsample):
     outt, outs = [], []
     # for each frequency, interpolate onto the cartesian grid
     for idx in range(up_t.shape[1]):
-        datt = griddata(samples, up_t[:, idx, :].ravel(), (xx, yy), method='linear')
-        dats = griddata(samples, up_s[:, idx, :].ravel(), (xx, yy), method='linear')
+        datt = e.scipy.interpolate.griddata(samples, up_t[:, idx, :].ravel(), (xx, yy), method='linear')
+        dats = e.scipy.interpolate.griddata(samples, up_s[:, idx, :].ravel(), (xx, yy), method='linear')
         outt.append(datt.reshape(xx.shape))
         outs.append(dats.reshape(xx.shape))
 
@@ -643,13 +641,13 @@ def radial_mtf_to_mtfffd_data(tan, sag, imagehts, azimuths, upsample):
     return xq, yq, outt, outs
 
 
-def plot_mtf_vs_field(data_dict, fig=None, ax=None):
+def plot_mtf_vs_field(data_dict, fig=None, ax=None, labels=('MTF', 'Freq [lp/mm]', 'Field [mm]', 'Az'), palette=None):
     """Plot MTF vs Field.
 
     Parameters
     ----------
     data_dict : `dict`
-        dictionary with keys tan, sag, fields, frequencies
+        dictionary with keys tan, sag, fields, freq
     fig : `matplotlib.figure.Figure`, optional
         figure containing the plot
     axis : `matplotlib.axes.Axis`
@@ -663,19 +661,31 @@ def plot_mtf_vs_field(data_dict, fig=None, ax=None):
         axis containing the plot
 
     """
-    tan_mtf_array, sag_mtf_array = data_dict['tan'], data_dict['sag']
-    fields, frequencies = data_dict['field'], data_dict['freq']
-    freqs = _int_check_frequencies(frequencies)
+    import pandas as pd
+    import seaborn as sns
+
+    if palette is None:
+        palette = 'tab10'
+
+    tan = data_dict['tan']
+    sag = data_dict['sag']
+    freqs = _int_check_frequencies(data_dict['freq'])
+    fields = data_dict['field']
+    # tan, sag have indices of [freq][field]
+    proto_df = []
+    for i, freq in enumerate(freqs):
+        for j, field in enumerate(fields):
+            local_t = (tan[i][j], freq, field, 'tan')
+            local_s = (sag[i][j], freq, field, 'sag')
+            proto_df.append(local_t)
+            proto_df.append(local_s)
+
+    df = pd.DataFrame(data=proto_df, columns=labels)
 
     fig, ax = share_fig_ax(fig, ax)
 
-    for idx in range(tan_mtf_array.shape[0]):
-        l, = ax.plot(fields, tan_mtf_array[idx, :], label=freqs[idx])
-        ax.plot(fields, sag_mtf_array[idx, :], c=l.get_color(), ls='--')
-
-    ax.legend(title=r'$\nu$ [cy/mm]')
-    ax.set(xlim=(0, 14), xlabel='Image Height [mm]',
-           ylim=(0, 1), ylabel='MTF [Rel. 1.0]')
+    ax = sns.lineplot(x=labels[2], y=labels[0], hue=labels[1], style=labels[3], data=df, palette=palette, legend='full')
+    ax.set(ylim=(0, 1))
     return fig, ax
 
 

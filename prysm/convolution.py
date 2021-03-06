@@ -10,7 +10,6 @@ from .fttools import forward_ft_unit, pad2d
 
 class Convolvable(RichData):
     """A base class for convolvable objects to inherit from."""
-    _data_attr = 'data'
     _data_type = 'image'
 
     def __init__(self, x, y, data, has_analytic_ft=False, labels=None, xy_unit=None, z_unit=None):
@@ -29,6 +28,10 @@ class Convolvable(RichData):
             analytical fourier tansform
         labels : `Labels`
             labels to use.  If None, will use config.convolvable_labels
+        xy_unit : `astropy.units.Unit`
+            a unit of measure to quantify cartesian dimensions
+        z_unit : `astropy.units.Unit`
+            a unit of measure to quantify the vertical/intensity dimension
 
         """
         xy_unit = 'um'
@@ -130,13 +133,13 @@ class Convolvable(RichData):
         return Convolvable(result, self.x, self.y, False)
 
     def renorm(self):
-        """Renormalize so that the peak is at a value of unity and the minimum value is zero"""
+        """Renormalize so that the peak is at a value of unity and the minimum value is zero."""
         self.data -= self.data.min()
         self.data /= self.data.max()
         return self
 
     def msaa(self, factor=2):
-        """Multi-Sample anti-aliasing
+        """Multi-Sample anti-aliasing.
 
         Perform anti-aliasing by averaging blocks of (factor, factor) pixels
         into a simple value.
@@ -178,7 +181,7 @@ class Convolvable(RichData):
             typ = e.uint16
         else:
             raise ValueError('must use either 8 or 16 bpp.')
-        dat = (self.data * 2**nbits - 1).astype(typ)
+        dat = e.flipud((self.data * 2**nbits - 1).astype(typ))
         imwrite(path, dat)
 
     @staticmethod
@@ -210,6 +213,28 @@ class Convolvable(RichData):
 class ConvolutionEngine:
     """An engine to facilitate fine-grained control over convolutions."""
     def __init__(self, c1, c2=None, spatial_finalization=(abs,), Q=2, pad_method='linear_ramp'):
+        """Create a new ConvolutionEngine.
+
+        This object is used to perform the convolution of two things, the instance should be discarded after doing so.
+
+        Parameters
+        ----------
+        c1 : `Convolvable`
+            the first convolvable
+        c2 : `Convolvable, optional`
+            the second.  Can be provided later.
+        spatial_finalization : `tuple` of `Callable`
+            sequence of array friendly functions to call in succession
+            on the penultimate result, which is complex
+        Q : `float`
+            amount of padding applied to the objects before convolving.
+            Q=2 is Nyquist, Q=1 is no padding.  Q>2 may improve accuracy.
+        pad_method : `str`
+            method used to pad the data.  Valid argument to numpy.pad.  Which
+            is optimal depends on the data, linear_ramp is rarely bad and often
+            among the best.
+
+        """
         self.c1 = c1
         self.c2 = c2
         self.spatial_finalization = spatial_finalization

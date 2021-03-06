@@ -1,19 +1,32 @@
 """Basic class holding data, used to recycle code."""
 import copy
-import warnings
+import inspect
 from numbers import Number
 from collections.abc import Iterable
 
-from scipy import interpolate
-
 from .conf import config, sanitize_unit
-from .mathops import engine as e
+from .mathops import engine as np, interpolate_engine as interpolate
 from .wavelengths import mkwvl
 from .coordinates import uniform_cart_to_polar, polar_to_cart
 from .plotting import share_fig_ax
 
 
 def fix_interp_pair(x, y):
+    """Ensure that x, y have the same shape.  If either is scalar, it is broadcast for each value in the other.
+
+    Parameters
+    ----------
+    x : `float` or `Iterable`
+        x data
+    y : `float` or `Iterable`
+        y data
+
+    Returns
+    -------
+    `Iterable`, `Iterable`
+        x, y
+
+    """
     if y is None:
         y = 0
 
@@ -30,7 +43,6 @@ def fix_interp_pair(x, y):
 
 class RichData:
     """Abstract base class holding some data properties."""
-    _data_attr = 'data'
     _data_type = 'image'
     _default_twosided = True
     _slice_xscale = 'linear'
@@ -49,9 +61,9 @@ class RichData:
             data
         labels : `Labels`
             labels instance, can be shared
-        xyunit : `astropy.unit` or `str`, optional
+        xy_unit : `astropy.unit` or `str`, optional
             astropy unit or string which satisfies hasattr(astropy.units, xyunit)
-        zunit : `astropy.unit` or `str`, optional
+        z_unit : `astropy.unit` or `str`, optional
              astropy unit or string which satisfies hasattr(astropy.units, xyunit)
         wavelength : `astropy.unit` or `float`
             astropy unit or quantity or float with implicit units of microns
@@ -65,8 +77,7 @@ class RichData:
         if wavelength is None:
             wavelength = config.wavelength
 
-        self.x, self.y = x, y
-        setattr(self, self._data_attr, data)
+        self.x, self.y, self.data = x, y, data
         self.labels = labels
         self.wavelength = mkwvl(wavelength)
         self.xy_unit = sanitize_unit(xy_unit, self.wavelength)
@@ -77,7 +88,7 @@ class RichData:
     def shape(self):
         """Proxy to phase or data shape."""
         try:
-            return getattr(self, self._data_attr).shape
+            return self.data.shape
         except AttributeError:
             return (0, 0)
 
@@ -85,7 +96,7 @@ class RichData:
     def size(self):
         """Proxy to phase or data size."""
         try:
-            return getattr(self, self._data_attr).size
+            return self.data.size
         except AttributeError:
             return 0
 
@@ -103,9 +114,9 @@ class RichData:
     def sample_spacing(self):
         """center-to-center sample spacing."""
         try:
-            return self.x[1] - self.x[0]
+            return float(self.x[1] - self.x[0])
         except TypeError:
-            return e.nan
+            return np.nan
 
     @property
     def center_x(self):
@@ -120,6 +131,34 @@ class RichData:
     def copy(self):
         """Return a (deep) copy of this instance."""
         return copy.deepcopy(self)
+
+    def astype(self, other_type):
+        """Change this instance of one type into another.
+
+        Useful to access methods of the other class.
+
+        Parameters
+        ----------
+        other_type : `object`
+            the name of the other type to "cast" to, e.g. Interferogram.  Not a string.
+
+        Returns
+        -------
+        `self`
+            type-converted to the other type.
+
+        """
+        original_type = type(self)
+        sig = inspect.signature(other_type)
+        pass_params = {}
+        for param in sig.parameters:
+            if hasattr(self, param):
+                pass_params[param] = getattr(self, param)
+
+        other = other_type(**pass_params)
+        other._original_type = original_type
+        other._original_vars = vars(self)
+        return other
 
     def change_xy_unit(self, to, inplace=True):
         """Change the x/y unit to a new one, scaling the data in the process.
@@ -169,11 +208,11 @@ class RichData:
         """
         unit = sanitize_unit(to, self.wavelength)
         coef = self.z_unit.to(unit)
-        modified_data = getattr(self, self._data_attr) * coef
+        modified_data = self.data * coef
         if not inplace:
             return modified_data
         else:
-            setattr(self, self._data_attr, modified_data)
+            self.data = modified_data
             self.z_unit = unit
             return self
 
@@ -193,7 +232,7 @@ class RichData:
         """
         if twosided is None:
             twosided = self._default_twosided
-        return Slices(getattr(self, self._data_attr), x=self.x, y=self.y,
+        return Slices(data=self.data, x=self.x, y=self.y,
                       twosided=twosided, x_unit=self.xy_unit, z_unit=self.z_unit, labels=self.labels,
                       xscale=self._slice_xscale, yscale=self._slice_yscale)
 
@@ -207,7 +246,7 @@ class RichData:
 
         """
         if self.interpf_2d is None:
-            self.interpf_2d = interpolate.RegularGridInterpolator((self.y, self.x), getattr(self, self._data_attr))
+            self.interpf_2d = interpolate.RegularGridInterpolator((self.y, self.x), self.data)
 
         return self.interpf_2d
 
@@ -236,7 +275,7 @@ class RichData:
 
         Parameters
         ----------
-        r : iterable
+        rho : iterable
             radial coordinate(s) to sample
         phi : iterable
             azimuthal coordinate(s) to sample
@@ -377,7 +416,7 @@ class RichData:
         elif power != 1:
             norm = PowerNorm(power)
 
-        im = ax.imshow(getattr(self, self._data_attr),
+        im = ax.imshow(self.data,
                        extent=[self.x[0], self.x[-1], self.y[0], self.y[-1]],
                        cmap=cmap,
                        clim=clim,
@@ -396,20 +435,34 @@ class RichData:
 
         return fig, ax
 
-    @property
-    def slice_x(self):
-        warnings.warn('.slice_x is deprecated and will be removed in prysm v0.18, please use .slices().x')
-        return self.slices().x
-
-    @property
-    def slice_y(self):
-        warnings.warn('.slice_y is deprecated and will be removed in prysm v0.18, please use .slices().y')
-        return self.slices().y
-
 
 class Slices:
     """Slices of data."""
     def __init__(self, data, x, y, x_unit, z_unit, labels, xscale, yscale, twosided=True):
+        """Create a new Slices instance.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            2D array of data
+        x : `numpy.ndarray`
+            1D array of x points
+        y : `numpy.ndarray`
+            1D array of y points
+        x_unit : `astropy.units.unit`
+            spatial unit
+        z_unit : `astropy.units.unit`
+            depth/height axis unit
+        labels : `Labels`
+            labels for the axes
+        xscale : `str`, {'linear', 'log'}
+            scale for x axis when plotting
+        yscale : `str`, {'linear', 'log'}
+            scale for y axis when plotting
+        twosided : `bool`, optional
+            if True, plot slices from (-ext, ext), else from (0,ext)
+
+        """
         self._source = data
         self._source_polar = None
         self._r = None
@@ -419,7 +472,7 @@ class Slices:
         self.x_unit, self.z_unit = x_unit, z_unit
         self.labels = labels
         self.xscale, self.yscale = xscale, yscale
-        self.center_y, self.center_x = (int(e.ceil(s / 2)) for s in data.shape)
+        self.center_y, self.center_x = (int(np.ceil(s / 2)) for s in data.shape)
         self.twosided = twosided
 
     def check_polar_calculated(self):
@@ -476,7 +529,7 @@ class Slices:
 
         """
         self.check_polar_calculated()
-        return self._r, e.nanmean(self._source_polar, axis=0)
+        return self._r, np.nanmean(self._source_polar, axis=0)
 
     @property
     def azmedian(self):
@@ -491,7 +544,7 @@ class Slices:
 
         """
         self.check_polar_calculated()
-        return self._r, e.nanmedian(self._source_polar, axis=0)
+        return self._r, np.nanmedian(self._source_polar, axis=0)
 
     @property
     def azmin(self):
@@ -506,7 +559,7 @@ class Slices:
 
         """
         self.check_polar_calculated()
-        return self._r, e.nanmin(self._source_polar, axis=0)
+        return self._r, np.nanmin(self._source_polar, axis=0)
 
     @property
     def azmax(self):
@@ -521,7 +574,7 @@ class Slices:
 
         """
         self.check_polar_calculated()
-        return self._r, e.nanmax(self._source_polar, axis=0)
+        return self._r, np.nanmax(self._source_polar, axis=0)
 
     @property
     def azpv(self):
@@ -552,7 +605,7 @@ class Slices:
 
         """
         self.check_polar_calculated()
-        return self._r, e.nanvar(self._source_polar, axis=0)
+        return self._r, np.nanvar(self._source_polar, axis=0)
 
     @property
     def azstd(self):
@@ -567,14 +620,14 @@ class Slices:
 
         """
         self.check_polar_calculated()
-        return self._r, e.nanstd(self._source_polar, axis=0)
+        return self._r, np.nanstd(self._source_polar, axis=0)
 
     def plot(self, slices, lw=None, alpha=None, zorder=None, invert_x=False,
              xlim=(None, None), xscale=None,
              ylim=(None, None), yscale=None,
              show_legend=True, show_axlabels=True,
              fig=None, ax=None):
-        """Plot slice(s)
+        """Plot slice(s).
 
         Parameters
         ----------
@@ -623,8 +676,8 @@ class Slices:
             # these values are unsafe for fp32.  Maybe a bit pressimistic, but that's life
             zeros = abs(x) < 1e-9
             x, v = x.copy(), v.copy()
-            x[zeros] = e.nan
-            v[zeros] = e.nan
+            x[zeros] = np.nan
+            v[zeros] = np.nan
             x = 1 / x
             return x, v
 

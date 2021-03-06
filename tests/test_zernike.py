@@ -7,11 +7,25 @@ from prysm.coordinates import cart_to_polar
 from prysm import zernike
 
 import matplotlib
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 
 SAMPLES = 32
 
 X, Y = np.linspace(-1, 1, SAMPLES), np.linspace(-1, 1, SAMPLES)
+
+all_zernikes = [
+    zernike.piston,
+    zernike.tilt,
+    zernike.tip,
+    zernike.defocus,
+    zernike.primary_astigmatism_00,
+    zernike.primary_astigmatism_45,
+    zernike.primary_coma_y,
+    zernike.primary_coma_x,
+    zernike.primary_spherical,
+    zernike.primary_trefoil_y,
+    zernike.primary_trefoil_x,
+]
 
 
 @pytest.fixture
@@ -38,13 +52,8 @@ def sample():
 
 
 def test_all_zernfcns_run_without_error_or_nans(rho, phi):
-    for i in range(len(zernike.zernikes)):
-        assert zernike.zcache(i, norm=False, samples=SAMPLES).all()
-
-
-def test_all_zernfcns_run_without_errors_or_nans_with_norms(rho, phi):
-    for i in range(len(zernike.zernikes)):
-        assert zernike.zcache(i, norm=True, samples=SAMPLES).all()
+    for func in all_zernikes:
+        assert func(rho, phi).all()
 
 
 def test_can_build_fringezernike_pupil_with_vector_args():
@@ -58,17 +67,9 @@ def test_repr_is_a_str():
     assert type(repr(p)) is str
 
 
-def test_fringezernike_rejects_base_not_0_or_1():
-    with pytest.raises(ValueError):
-        zernike.FringeZernike(base=2)
-    with pytest.raises(ValueError):
-        zernike.FringeZernike(base=-1)
-
-
 def test_fringezernike_takes_all_named_args():
     params = {
         'norm': True,
-        'base': 1,
     }
     p = zernike.FringeZernike(**params)
     assert p
@@ -85,21 +86,14 @@ def test_fringezernike_will_pass_pupil_args():
 
 def test_fit_agrees_with_truth(fit_data):
     data, real_coefs = fit_data
-    coefs = zernike.zernikefit(data, map_='fringe')
-    real_coefs = np.asarray(real_coefs)
-    assert coefs[8] == pytest.approx(real_coefs[8])
+    coefs = zernike.zernikefit(data, map_='Fringe')
+    assert coefs[8] == pytest.approx(real_coefs[9])  # compare 8 (0-based index 9) to 9 (dict key)
 
 
 def test_fit_does_not_throw_on_normalize(fit_data):
     data, real_coefs = fit_data
-    coefs = zernike.zernikefit(data, norm=True, map_='fringe')
-    assert coefs[8] != 0
-
-
-def test_fit_raises_on_too_many_terms(fit_data):
-    data, real_coefs = fit_data
-    with pytest.raises(ValueError):
-        zernike.zernikefit(data, terms=100)
+    coefs = zernike.zernikefit(data, norm=True, map_='Noll')
+    assert coefs[10] != 0
 
 
 def test_names_functions(sample):
@@ -137,3 +131,28 @@ def test_truncate_functions(sample):
 
 def test_truncate_topn_functions(sample):
     assert sample.truncate_topn(9)
+
+
+@pytest.mark.parametrize('n', [2, 4, 6, 8, 10, 12, 14, 16, 18, 20])
+def test_zero_separation_gives_correct_array_sizes(n):
+    sep = zernike.zero_separation(n)
+    assert int(1/sep) == int(n**2)
+
+
+@pytest.mark.parametrize('fringe_idx', range(1, 100))
+def test_nm_to_fringe_round_trips(fringe_idx):
+    n, m = zernike.fringe_to_n_m(fringe_idx)
+    j = zernike.n_m_to_fringe(n, m)
+    assert j == fringe_idx
+
+
+def test_ansi_2_term_can_construct():
+    assert zernike.ANSI2TermZernike(A3_1=1, B4_0=1)
+
+
+def test_ansi_1_term_can_construct():
+    assert zernike.ANSI1TermZernike(Z10=1)
+
+
+def test_can_stringify_zernike_pupil():
+    assert str(zernike.NollZernike(np.arange(50), samples=32))

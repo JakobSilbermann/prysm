@@ -6,6 +6,7 @@ import codecs
 import datetime
 import calendar
 import shutil
+import warnings
 
 import numpy as np
 
@@ -124,6 +125,27 @@ def read_trioptics_mtf_vs_field(file, metadata=False):
         dictionary with keys of freq, field, tan, sag
 
     """
+    warnings.warn('this function will dispatch to either read_trioptics_mtf_vs_field_mtflab_v4, or _v5 in v0.20.  In v0.19, it always uses _v4.')
+    return read_trioptics_mtf_vs_field_mtflab_v4(file, metadata=metadata)
+
+
+def read_trioptics_mtf_vs_field_mtflab_v4(file, metadata=False):
+    """Read tangential and sagittal MTF data from a Trioptics .mht file.  Compatible with MTF-Lab v4.
+
+    Parameters
+    ----------
+    file : `str` or path_like or file_like
+        contents of a file, path_like to the file, or file object
+    metadata : `bool`
+        whether to also extract and return metadata
+
+    Returns
+    -------
+    `dict`
+        dictionary with keys of freq, field, tan, sag
+
+    """
+    warnings.warn('this function will dispatch to either read_trioptics_mtf_vs_field_mtflab_v4, or _v5 in v0.20.  In v0.19, it always uses _v4.')
     data = read_file_stream_or_path(file)
     data = data[:len(data)//10]  # only search in a subset of the file for speed
 
@@ -160,6 +182,80 @@ def read_trioptics_mtf_vs_field(file, metadata=False):
         return res
 
 
+def read_trioptics_mtf_vs_field_mtflab_v5(file_contents, metadata=False):
+    """Read tangential and sagittal MTF data from a Trioptics .mht file.  Compatible with MTF-Lab v5.
+
+    Parameters
+    ----------
+    file : `str` or path_like or file_like
+        contents of a file, path_like to the file, or file object
+    metadata : `bool`
+        whether to also extract and return metadata
+
+    Returns
+    -------
+    `dict`
+        dictionary with keys of freq, field, tan, sag
+
+    """
+    if metadata:
+        mdata = parse_trioptics_metadata_mtflab_v5(file_contents)
+
+    end = file_contents.find('<!-- close certificate table -->')
+    file_contents = file_contents[:end]
+
+    # now chunk out the first table and get our image heights
+    start = file_contents.find('<!--  begin table caption -->')
+    end = file_contents.find('<!-- end table caption -->')
+    image_heights = []
+    body = file_contents[start+29:end]  # 29 = len of begin text
+    body = body.splitlines()[8:-2]  # first, last few rows are noise
+    for row in body:
+        value = row.split('>', 1)[1].split('<')[0]
+        image_heights.append(float(value))
+
+    # now chunk out the second, which we parse a little differently
+    file_contents = file_contents[end:]
+    start = file_contents.find('<!-- begin measurement data -->')
+    end = file_contents.find('<!-- end measurement data -->')
+    file_contents = file_contents[start+31:end]  # 31 is len of begin
+    # now file_contents is the text of the table and a little noise.
+    # set up parsed tables...
+    tan = []
+    sag = []
+    freqs = []
+    rows = file_contents.split('<tr ')[1:]
+    for row in rows:
+        cells = row.split('<td')[1:-1]  # first, last are garbage
+        # first cell is azimuth and frequency, rest are MTF vs Field
+        az, freq = cells[0].split('>', 1)[1].split('<')[0].split()
+        freq = float(freq.split('(')[0])
+        if az == 'Sag':
+            target = sag
+        else:
+            target = tan
+
+        tmp = []
+        for cell in cells[1:]:  # first, last cells are trash
+            value = cell.split('>', 1)[1].split('<')[0]
+            tmp.append(float(value))
+
+        target.append(tmp)
+        if freq not in freqs:
+            freqs.append(freq)
+
+    data = {
+        'tan':  np.asarray(tan, dtype=config.precision),
+        'sag': np.asarray(sag, dtype=config.precision),
+        'field': np.asarray(image_heights, dtype=config.precision),
+        'freq': np.asarray(freqs, dtype=config.precision),
+    }
+    if metadata:
+        return {**data, **mdata}
+    else:
+        return data
+
+
 def read_trioptics_mtf(file, metadata=False):
     """Read MTF data from a Trioptics data file.
 
@@ -173,7 +269,7 @@ def read_trioptics_mtf(file, metadata=False):
     Returns
     -------
     `dict`
-        dictionary with keys focus, wavelength, freq, tan, sag
+        dictionary with keys focus, freq, tan, sag
         if metadata=True, also has keys in the return of
         `io.parse_trioptics_metadata`.
 
@@ -246,6 +342,35 @@ def parse_trioptics_metadata(file_contents):
             - azimuth
 
     """
+    warnings.warn('this function will dispatch to either parse_trioptics_metadata_mtflab_v4, or _v5 in v0.20.  In v0.19, it always uses _v4.')
+    return parse_trioptics_metadata_mtflab_v4(file_contents)
+
+
+def parse_trioptics_metadata_mtflab_v4(file_contents):
+    """Read metadata from the contents of a Trioptics .mht file.  Compatible with MTF-Lab v4.
+
+    Parameters
+    ----------
+    file_contents : `str`
+        contents of a .mht file.
+
+    Returns
+    -------
+    `dict`
+        dictionary with keys:
+            - operator
+            - time
+            - sample_id
+            - instrument
+            - instrument_sn
+            - collimator
+            - wavelength
+            - efl
+            - obj_angle
+            - focus_pos
+            - azimuth
+
+    """
     data = file_contents[750:1500]  # skip large section to make regex faster
 
     operator_scanner = re.compile(r'Operator         : (\S*)')
@@ -291,6 +416,78 @@ def parse_trioptics_metadata(file_contents):
         'focus_pos': focus_pos,
         'azimuth': azimuth,
     }
+
+
+def parse_trioptics_metadata_mtflab_v5(file_contents):
+    """Read metadata from the contents of a Trioptics .mht file.  Compatible with MTF-Lab v5.
+
+    Parameters
+    ----------
+    file_contents : `str`
+        contents of a .mht file.
+
+    Returns
+    -------
+    `dict`
+        dictionary with keys:
+            - operator
+            - time
+            - sample_id
+            - instrument
+            - instrument_sn
+            - collimator
+            - wavelength
+            - efl
+            - obj_angle
+            - focus_pos
+            - azimuth
+
+    """
+    # get the first header block, there are two...
+    top = file_contents.find('<pre>')
+    bottom = file_contents.find('</pre>', top)
+    body = file_contents[top+5:bottom].splitlines()  # 5 is len of <pre>
+    sep = ': '
+
+    company = body[0].split(sep)[-1].strip()
+    operator = body[1].split(sep)[-1].strip()
+    timestamp = body[2].split(sep)[-1].strip()
+    timestamp = datetime.datetime.strptime(timestamp, '%H:%M:%S  %B %d, %Y')
+    sampleid = body[3].split(sep)[-1].strip()
+    instrument_sn = body[8].split(sep)[-1].strip()
+
+    # now the second block
+    top = file_contents.find('<pre>', bottom)
+    bottom = file_contents.find('</pre>', top)
+    body = file_contents[top+5:bottom].splitlines()  # 5 is len of <pre>
+
+    # EFL (Collimator)     : 300 mm => 300 mm => [300, mm] => float(300)
+    collimator_efl = float(body[1].split(sep)[-1].strip().split(' ')[0])
+    wavelength = body[2].split(sep)[-1].strip()
+
+    # EFL (Sample)        : 26.4664 mm => 20.4664 mm => [20.4664, mm] => float(20.4664)
+    efl = float(body[3].split(sep)[-1].split()[0].strip())
+    fno = float(body[4].split(sep)[-1].split('=')[0])
+    obj_angle = float(body[5].split(sep)[-1].split()[0])
+    focus_pos = float(body[6].split(sep)[-1].split()[0])
+    azimuth = float(body[7].split(sep)[-1].split()[0])
+    efl, fno, obj_angle, focus_pos, azimuth
+    meta = {
+        'company': company,
+        'operator': operator,
+        'timestamp': timestamp,
+        'sample_id': sampleid,
+        'instrument': 'Trioptics ImageMaster',
+        'instrument_sn': instrument_sn,
+        'collimator': collimator_efl,
+        'wavelength': wavelength,
+        'efl': efl,
+        'fno': fno,
+        'obj_angle': obj_angle,
+        'focus_pos': focus_pos,
+        'azimuth': azimuth,
+    }
+    return meta
 
 
 def identify_trioptics_measurement_type(file):
@@ -407,8 +604,32 @@ def read_zygo_datx(file):
             intensity = e.flipud(f['Data']['Intensity'][intens_block][()].astype(e.uint16))
         except KeyError:
             intensity = None
-        phase_block = list(f['Data']['Surface'].keys())[0]
-        phase = e.flipud(f['Data']['Surface'][phase_block][()])
+
+        # load phase
+        # find the phase array's H5 group
+        phase_key = list(f['Data']['Surface'].keys())[0]
+        phase_obj = f['Data']['Surface'][phase_key]
+
+        # get a little metadata
+        no_data = phase_obj.attrs['No Data'][0]
+        wvl = phase_obj.attrs['Wavelength'][0] * 1e9  # Zygo stores wavelength in meters, we want output in nanometers
+        punit = str(phase_obj.attrs['Unit'][0])[2:-1]  # this for some reason is "b'Fringes'", need to slice off b' and '
+        scale_factor = phase_obj.attrs['Interferometric Scale Factor']
+        obliquity = phase_obj.attrs['Obliquity Factor']
+
+        # get the phase and process it as required
+        phase = e.flipud(f['Data']['Surface'][phase_key][()])
+        # step 1, flip (above)
+        # step 2, clip the nans
+        # step 3, convert punit to nm
+        phase[phase >= no_data] = e.nan
+        if punit == 'Fringes':
+            # the usual conversion per malacara
+            phase = phase * obliquity * scale_factor * wvl
+        elif punit == 'NanoMeters':
+            pass
+        else:
+            raise ValueError("datx file does not use expected phase unit, contact the prysm author with a sample file to resolve")
 
         # now get attrs
         attrs = f['Attributes']
@@ -418,16 +639,18 @@ def read_zygo_datx(file):
         for key, value in attrs.items():
             if key.endswith('Unit'):
                 continue  # do not need unit keys, units implicitly understood.
-            if '.Data Attributes.' in key:
-                key = key.split('.Data Attributes.')[-1]
+
+            if key.startswith("Data Context."):
+                key = key[len("Data Context."):]
+
+            if key.startswith("Data Attributes."):
+                key = key[len("Data Attributes."):]
             if key.endswith('Value'):
                 key = key[:-5]  # strip value from key
             if key.endswith(':'):
                 key = key[:-1]
             if key == 'Resolution':
                 key = 'Lateral Resolution'
-            elif key.endswith('Data Context.Lateral Resolution'):
-                continue  # duplicate
             elif key in ['Property Bag List', 'Group Number', 'TextCount']:
                 continue  # h5py particulars
             if value.dtype == 'object':
@@ -440,47 +663,6 @@ def read_zygo_datx(file):
                 continue  # compound items, h5py objects that do not map nicely to primitives
 
             meta[key] = value
-
-        # lastly, obliquity factor.  Because Mx is spaghetti code and it can appear in many places
-        # under different names, or not at all.  Thanks, Zygo.
-        try:
-            # "new style" datx files, Measurement is a branch of the h5 tree
-            # with duplicates of surface and intenisty, but different attrs.
-            # Pluck the obliquity from here, if possible.
-            obliq = f['Measurement']['Surface'].attrs['Obliquity Factor']
-        except KeyError:
-            try:
-                # possibly an "old style" datx file, "obliquity" in the master attrs
-                obliq = (meta['Obliquity'],)
-                del meta['Obliquity']
-            except KeyError:
-                obliq = (1,)
-
-        meta['Obliquity Factor'] = float(obliq[0])
-
-        was_nx2 = False
-
-        # These may be Mx 7.3 and not NX2 problems, I don't know.
-        if 'Interf Scale Factor' not in meta:
-            # NX2-type datx file, look under surface attributes...
-            meta['Interf Scale Factor'] = f['Measurement']['Surface'].attrs['Interferometric Scale Factor'][0]
-            was_nx2 = True
-
-        if 'Lateral Resolution' not in meta:
-            # NX2-type.  magic numbers [0][2][1], h5 is such a great format...
-            meta['Lateral Resolution'] = f['Measurement']['Surface'].attrs['X Converter'][0][2][1]
-            was_nx2 = True
-
-        if 'No Data' not in meta:
-            try:
-                meta['No Data'] = f['Measurement']['Surface'].attrs['No Data'][0]
-            except KeyError:
-                meta['No Data'] = ZYGO_INVALID_PHASE
-
-    phase[phase >= meta['No Data']] = e.nan
-    phase = phase.astype(config.precision)  # cast to big endian
-    if not was_nx2:
-        phase *= (meta['Interf Scale Factor'] * meta['Obliquity Factor'] * meta['Wavelength']) * 1e9
 
     return {
         'phase': phase,
